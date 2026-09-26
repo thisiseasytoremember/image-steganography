@@ -50,7 +50,7 @@ st.set_page_config(page_title="Image Steganography System", page_icon="🔒", la
 st.title("🔒 Image Steganography System")
 st.markdown("A Cryptographic Tool for Concealing Textual Data inside Digital Images using LSB Encoding.")
 
-tab_encode, tab_decode = st.tabs(["🔒 Encode Message", "🔓 Decode Message"])
+tab_encode, tab_decode = st.tabs(["🔒 Message Encryption", "🔓 Message Decryption"])
 
 with tab_encode:
     st.header("Encode Secret Data")
