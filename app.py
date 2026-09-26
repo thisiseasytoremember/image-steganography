@@ -1,46 +1,93 @@
-import gradio as gr
-from PIL import Image
+import streamlit as st
 import numpy as np
+from PIL import Image, ImageDraw
+import io
 
 DELIMITER = "#####"
 
-def encode(img, secret_text):
-    if img is None or not secret_text:
-        return None, "Please provide both an image and text."
-    img_array = np.array(img.convert('RGB'), dtype=np.uint8)
-    bits = np.unpackbits(np.frombuffer((secret_text + DELIMITER).encode('utf-8'), dtype=np.uint8))
+def encode_image(image: Image.Image, secret_text: str):
+    img = image.convert('RGB')
+    img_array = np.array(img, dtype=np.uint8)
+    full_text = secret_text + DELIMITER
+    bits = np.unpackbits(np.frombuffer(full_text.encode('utf-8'), dtype=np.uint8))
     if len(bits) > img_array.size:
-        return None, "Message is too large for this image."
-    flat = img_array.flatten()
-    flat[:len(bits)] = (flat[:len(bits)] & ~1) | bits
-    return Image.fromarray(flat.reshape(img_array.shape)), "Successfully Encoded!"
+        return None, "Error: Message is too large for this image."
+    flat_img = img_array.flatten()
+    flat_img[:len(bits)] = (flat_img[:len(bits)] & ~1) | bits
+    return Image.fromarray(flat_img.reshape(img_array.shape)), "Success"
 
-def decode(img):
-    if img is None:
-        return "Please upload an image."
-    flat = np.array(img.convert('RGB'), dtype=np.uint8).flatten()
-    extracted = np.packbits(flat & 1).tobytes()
-    idx = extracted.find(DELIMITER.encode('utf-8'))
-    if idx != -1:
-        return extracted[:idx].decode('utf-8', errors='ignore')
-    return "No hidden message found."
+def decode_image(image: Image.Image) -> str:
+    img = image.convert('RGB')
+    flat_img = np.array(img, dtype=np.uint8).flatten()
+    extracted_bytes = np.packbits(flat_img & 1).tobytes()
+    delimiter_bytes = DELIMITER.encode('utf-8')
+    delimiter_index = extracted_bytes.find(delimiter_bytes)
+    if delimiter_index != -1:
+        return extracted_bytes[:delimiter_index].decode('utf-8', errors='ignore')
+    return ""
 
-# UI Construction
-with gr.Blocks(title="Image Steganography System") as app:
-    gr.Markdown("# 🔒 Image Steganography System")
-    
-    with gr.Tab("Encode Message"):
-        img_in = gr.Image(type="pil", label="Upload Carrier Image")
-        msg_in = gr.Textbox(label="Secret Message", placeholder="Type here...")
-        btn_enc = gr.Button("Encode Message", variant="primary")
-        img_out = gr.Image(type="pil", label="Encoded Stego-Image")
-        status_out = gr.Textbox(label="Status")
-        btn_enc.click(encode, inputs=[img_in, msg_in], outputs=[img_out, status_out])
+def generate_preset_image(preset_name: str) -> Image.Image:
+    img = Image.new('RGB', (400, 400), color=(255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    if preset_name == "Blue Gradient":
+        for i in range(400):
+            draw.line([(0, i), (400, i)], fill=(30, 80, (i * 2) % 256))
+    elif preset_name == "Sunset Horizon":
+        for i in range(400):
+            draw.line([(0, i), (400, i)], fill=(255, (i % 256), 40))
+    elif preset_name == "Emerald Field":
+        for i in range(400):
+            draw.line([(i, 0), (i, 400)], fill=(20, 140 - (i % 80), 60))
+    elif preset_name == "Geometric Matrix":
+        draw.rectangle([0, 0, 400, 400], fill=(220, 220, 220))
+        draw.rectangle([50, 50, 350, 350], fill=(40, 40, 120))
+        draw.rectangle([100, 100, 300, 300], fill=(200, 60, 60))
+    return img
 
-    with gr.Tab("Decode Message"):
-        stego_in = gr.Image(type="pil", label="Upload Stego-Image")
-        btn_dec = gr.Button("Extract Message", variant="primary")
-        msg_out = gr.Textbox(label="Extracted Message")
-        btn_dec.click(decode, inputs=[stego_in], outputs=msg_out)
+st.set_page_config(page_title="Image Steganography System", page_icon="🔒", layout="centered")
+st.title("🔒 Image Steganography System")
+st.markdown("A Cryptographic Tool for Concealing Textual Data inside Digital Images using LSB Encoding.")
 
-app.launch()
+tab_encode, tab_decode = st.tabs(["🔒 Encode Message", "🔓 Decode Message"])
+
+with tab_encode:
+    st.header("Encode Secret Data")
+    source_type = st.radio("Select Image Input Method:", ["Upload Custom Image", "Select Preset Sample"], horizontal=True)
+    input_img = None
+    if source_type == "Upload Custom Image":
+        uploaded_file = st.file_uploader("Upload Target Image (PNG recommended):", type=["png", "jpg", "jpeg"])
+        if uploaded_file:
+            input_img = Image.open(uploaded_file)
+    else:
+        preset_choice = st.selectbox("Choose a Sample Image:", ["Blue Gradient", "Sunset Horizon", "Emerald Field", "Geometric Matrix"])
+        input_img = generate_preset_image(preset_choice)
+    if input_img:
+        st.image(input_img, caption="Selected Carrier Image", width=350)
+        secret_message = st.text_area("Enter Secret Message:", placeholder="Type payload here...")
+        if st.button("Generate Stego-Image", type="primary"):
+            if not secret_message.strip():
+                st.warning("Please enter a message.")
+            else:
+                stego_image, status = encode_image(input_img, secret_message)
+                if stego_image:
+                    st.success("Payload embedded successfully!")
+                    st.image(stego_image, caption="Generated Stego-Image", width=350)
+                    buffer = io.BytesIO()
+                    stego_image.save(buffer, format="PNG")
+                    st.download_button(label="📥 Download Encoded PNG Image", data=buffer.getvalue(), file_name="stego_image.png", mime="image/png")
+                else:
+                    st.error(status)
+
+with tab_decode:
+    st.header("Decode Secret Data")
+    uploaded_stego_file = st.file_uploader("Upload Stego-Image for Extraction:", type=["png"], key="decoder_uploader")
+    if uploaded_stego_file:
+        stego_input_img = Image.open(uploaded_stego_file)
+        st.image(stego_input_img, caption="Uploaded Stego-Image", width=350)
+        if st.button("Extract Message", type="primary"):
+            extracted_payload = decode_image(stego_input_img)
+            if extracted_payload:
+                st.success("Extraction Completed Successfully!")
+                st.text_area("Extracted Secret Message:", value=extracted_payload, height=150, disabled=True)
+            else:
+                st.error("No valid hidden payload detected.")
