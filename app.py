@@ -13,7 +13,9 @@ def encode_image(image: Image.Image, secret_text: str):
     if len(bits) > img_array.size:
         return None, "Error: Message is too large for this image."
     flat_img = img_array.flatten()
-    flat_img[:len(bits)] = (flat_img[:len(bits)] & ~1) | bits
+    
+    # 0xFE safely clears the LSB for uint8 without overflow
+    flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
     return Image.fromarray(flat_img.reshape(img_array.shape)), "Success"
 
 def decode_image(image: Image.Image) -> str:
