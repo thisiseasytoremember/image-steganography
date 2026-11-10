@@ -6,14 +6,12 @@ import io
 DELIMITER = "#####"
 
 def convert_to_png(img: Image.Image) -> Image.Image:
-    """अगर इमेज PNG नहीं है, तो उसे इन-मेमोरी PNG में कन्वर्ट करता है"""
+    """Check if the uploaded image is PNG. If not, convert it to PNG in-memory."""
     if img.format != 'PNG':
         buffer = io.BytesIO()
-        # RGB या RGBA मोड को बनाए रखते हुए PNG में सेव करें
         img.save(buffer, format='PNG')
         buffer.seek(0)
-        png_img = Image.open(buffer)
-        return png_img
+        return Image.open(buffer)
     return img
 
 def encode_image(image: Image.Image, secret_text: str):
@@ -71,7 +69,7 @@ with tab_encode:
         uploaded_file = st.file_uploader("Upload Target Image (PNG recommended):", type=["png", "jpg", "jpeg", "webp", "bmp"])
         if uploaded_file:
             loaded_img = Image.open(uploaded_file)
-            # इमेज को ऑटोमैटिकली PNG में कन्वर्ट करें
+            # Automatically convert uploaded non-PNG image to PNG
             input_img = convert_to_png(loaded_img)
     else:
         preset_choice = st.selectbox("Choose a Sample Image:", ["Blue Gradient", "Sunset Horizon", "Emerald Field", "Geometric Matrix"])
