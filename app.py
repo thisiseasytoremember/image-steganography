@@ -5,6 +5,17 @@ import io
 
 DELIMITER = "#####"
 
+def convert_to_png(img: Image.Image) -> Image.Image:
+    """अगर इमेज PNG नहीं है, तो उसे इन-मेमोरी PNG में कन्वर्ट करता है"""
+    if img.format != 'PNG':
+        buffer = io.BytesIO()
+        # RGB या RGBA मोड को बनाए रखते हुए PNG में सेव करें
+        img.save(buffer, format='PNG')
+        buffer.seek(0)
+        png_img = Image.open(buffer)
+        return png_img
+    return img
+
 def encode_image(image: Image.Image, secret_text: str):
     img = image.convert('RGB')
     img_array = np.array(img, dtype=np.uint8)
@@ -57,12 +68,15 @@ with tab_encode:
     source_type = st.radio("Select Image Input Method:", ["Upload Custom Image", "Select Preset Sample"], horizontal=True)
     input_img = None
     if source_type == "Upload Custom Image":
-        uploaded_file = st.file_uploader("Upload Target Image (PNG recommended):", type=["png", "jpg", "jpeg"])
+        uploaded_file = st.file_uploader("Upload Target Image (PNG recommended):", type=["png", "jpg", "jpeg", "webp", "bmp"])
         if uploaded_file:
-            input_img = Image.open(uploaded_file)
+            loaded_img = Image.open(uploaded_file)
+            # इमेज को ऑटोमैटिकली PNG में कन्वर्ट करें
+            input_img = convert_to_png(loaded_img)
     else:
         preset_choice = st.selectbox("Choose a Sample Image:", ["Blue Gradient", "Sunset Horizon", "Emerald Field", "Geometric Matrix"])
         input_img = generate_preset_image(preset_choice)
+        
     if input_img:
         st.image(input_img, caption="Selected Carrier Image", width=350)
         secret_message = st.text_area("Enter Secret Message:", placeholder="Type payload here...")
