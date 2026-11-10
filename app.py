@@ -2,6 +2,7 @@ import streamlit as st
 import numpy as np
 from PIL import Image, ImageDraw
 import io
+import hashlib
 
 DELIMITER = "#####"
 
@@ -14,27 +15,53 @@ def convert_to_png(img: Image.Image) -> Image.Image:
         return Image.open(buffer)
     return img
 
-def encode_image(image: Image.Image, secret_text: str):
+def derive_key(password: str, salt: bytes = b"stego_salt_123") -> bytes:
+    """Derive a fixed-length key from a password using PBKDF2 (SHA256)."""
+    return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt, iterations=100000)
+
+def xor_crypt(data: bytes, key: bytes) -> bytes:
+    """Encrypt or decrypt data using XOR stream with the derived key."""
+    key_len = len(key)
+    return bytes([b ^ key[i % key_len] for i, b in enumerate(data)])
+
+def encode_image(image: Image.Image, secret_text: str, password: str = ""):
     img = image.convert('RGB')
     img_array = np.array(img, dtype=np.uint8)
-    full_text = secret_text + DELIMITER
-    bits = np.unpackbits(np.frombuffer(full_text.encode('utf-8'), dtype=np.uint8))
+    
+    # Payload preparation
+    payload_bytes = secret_text.encode('utf-8')
+    if password:
+        key = derive_key(password)
+        payload_bytes = xor_crypt(payload_bytes, key)
+    
+    full_payload = payload_bytes + DELIMITER.encode('utf-8')
+    bits = np.unpackbits(np.frombuffer(full_payload, dtype=np.uint8))
+    
     if len(bits) > img_array.size:
         return None, "Error: Message is too large for this image."
+        
     flat_img = img_array.flatten()
     
     # 0xFE safely clears the LSB for uint8 without overflow
     flat_img[:len(bits)] = (flat_img[:len(bits)] & 0xFE) | bits
     return Image.fromarray(flat_img.reshape(img_array.shape)), "Success"
 
-def decode_image(image: Image.Image) -> str:
+def decode_image(image: Image.Image, password: str = "") -> str:
     img = image.convert('RGB')
     flat_img = np.array(img, dtype=np.uint8).flatten()
     extracted_bytes = np.packbits(flat_img & 1).tobytes()
     delimiter_bytes = DELIMITER.encode('utf-8')
     delimiter_index = extracted_bytes.find(delimiter_bytes)
+    
     if delimiter_index != -1:
-        return extracted_bytes[:delimiter_index].decode('utf-8', errors='ignore')
+        raw_payload = extracted_bytes[:delimiter_index]
+        if password:
+            key = derive_key(password)
+            raw_payload = xor_crypt(raw_payload, key)
+        try:
+            return raw_payload.decode('utf-8')
+        except UnicodeDecodeError:
+            return "ERROR: Incorrect password or corrupted data."
     return ""
 
 def generate_preset_image(preset_name: str) -> Image.Image:
@@ -69,7 +96,6 @@ with tab_encode:
         uploaded_file = st.file_uploader("Upload Target Image (PNG recommended):", type=["png", "jpg", "jpeg", "webp", "bmp"])
         if uploaded_file:
             loaded_img = Image.open(uploaded_file)
-            # Automatically convert uploaded non-PNG image to PNG
             input_img = convert_to_png(loaded_img)
     else:
         preset_choice = st.selectbox("Choose a Sample Image:", ["Blue Gradient", "Sunset Horizon", "Emerald Field", "Geometric Matrix"])
@@ -78,11 +104,20 @@ with tab_encode:
     if input_img:
         st.image(input_img, caption="Selected Carrier Image", width=350)
         secret_message = st.text_area("Enter Secret Message:", placeholder="Type payload here...")
+        
+        # Optional Password Protection Feature
+        use_password = st.checkbox("🔑 Protect message with a password")
+        password = ""
+        if use_password:
+            password = st.text_input("Enter Password:", type="password", placeholder="Choose a strong secret key")
+            
         if st.button("Generate Stego-Image", type="primary"):
             if not secret_message.strip():
                 st.warning("Please enter a message.")
+            elif use_password and not password.strip():
+                st.warning("Please enter a password or uncheck password protection.")
             else:
-                stego_image, status = encode_image(input_img, secret_message)
+                stego_image, status = encode_image(input_img, secret_message, password)
                 if stego_image:
                     st.success("Payload embedded successfully!")
                     st.image(stego_image, caption="Generated Stego-Image", width=350)
@@ -98,10 +133,20 @@ with tab_decode:
     if uploaded_stego_file:
         stego_input_img = Image.open(uploaded_stego_file)
         st.image(stego_input_img, caption="Uploaded Stego-Image", width=350)
+        
+        # Optional Password Input for Decryption
+        has_password = st.checkbox("🔑 Is this image protected with a password?", key="decode_pass_check")
+        decode_password = ""
+        if has_password:
+            decode_password = st.text_input("Enter Password to Decrypt:", type="password", key="decode_pass_input")
+            
         if st.button("Extract Message", type="primary"):
-            extracted_payload = decode_image(stego_input_img)
+            extracted_payload = decode_image(stego_input_img, decode_password)
             if extracted_payload:
-                st.success("Extraction Completed Successfully!")
-                st.text_area("Extracted Secret Message:", value=extracted_payload, height=150, disabled=True)
+                if extracted_payload.startswith("ERROR:"):
+                    st.error(extracted_payload)
+                else:
+                    st.success("Extraction Completed Successfully!")
+                    st.text_area("Extracted Secret Message:", value=extracted_payload, height=150, disabled=True)
             else:
                 st.error("No valid hidden payload detected.")
